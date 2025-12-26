@@ -1,34 +1,68 @@
 #!/bin/bash
 set -e
 
-if [ ! -f "$MIGRATION_PATH/etc/uninstall-modules.txt" ]; then
-   exit 0
+# Root of your Odoo build (adjust if needed)
+SCRIPT_PATH="$(cd "$(/usr/bin/dirname "${0}")" && /bin/pwd)"
+export MIGRATION_PATH="${MIGRATION_PATH:-$(cd "${SCRIPT_PATH}/../../migration" && /bin/pwd)}"
+
+ODOO_CONF="${ODOO_CONF:-${MIGRATION_PATH}/build-${MIGRATION_START_VERSION}/auto/odoo.conf}"
+
+if [[ ! -f "$MIGRATION_PATH/etc/uninstall-modules.txt" ]]; then
+	exit 0
 fi
-UNINSTALL_LIST=$(cat "$MIGRATION_PATH/etc/uninstall-modules.txt")
 
+source "${MIGRATION_PATH}/build-${MIGRATION_START_VERSION}/.venv/bin/activate"
 
-for MODULE_NAME in ${UNINSTALL_LIST[@]}; do
-    .venv/bin/python <<PYTHON
-from anybox.recipe.odoo.runtime.session import Session
+click-odoo -c "$ODOO_CONF" <<'PYEOF'
+import os
+import sys
+import logging
+import traceback
 
-if "$MODULE_NAME".startswith("#"):
-    exit(0)
+logging.basicConfig(
+    level=logging.INFO,
+    stream=sys.stderr,
+    format="%(message)s",
+)
 
-session = Session("auto/odoo.conf", ".")
-session.open()
-env = session.env
+MIGRATION_PATH = os.environ.get("MIGRATION_PATH", os.getcwd())
+uninstall_file = os.path.join(MIGRATION_PATH, "etc", "uninstall-modules.txt")
 
-module = env["ir.module.module"].search([("name", "=", "$MODULE_NAME")])
-if module and module.state != 'uninstalled':
-    print("Uninstalling $MODULE_NAME...")
-    module.button_immediate_uninstall()
-    if module.state != 'uninstalled':
-        raise Exception("Module %s was not uninstalled, has state \"%s\"" % (
-            module.name,
-            module.state
-        ))
+try:
+    with open(uninstall_file, "r") as fff:
+        module_names = [
+            line.strip()
+            for line in fff
+            if line.strip() and not line.startswith("#")
+        ]
+except Exception as eee:
+    logging.error("Failed to read uninstall file: %s", eee)
+    sys.exit(1)
 
-session.cr.commit()
-session.close()
-PYTHON
-done
+logging.info("Found %d modules to uninstall.", len(module_names))
+
+module_model = env["ir.module.module"]
+
+for module_name in module_names:
+    logging.info("Processing module: %s", module_name)
+
+    module = module_model.search([("name", "=", module_name)], limit=1)
+    if not module:
+        logging.info(" → Not found, skipping.")
+        continue
+
+    if module.state not in ("installed", "to install", "to upgrade"):
+        logging.info(" → Already uninstalled (state=%s).", module.state)
+        continue
+
+    logging.info(" → Uninstalling...")
+    try:
+        module.button_immediate_uninstall()
+        logging.info(" → Successfully uninstalled.")
+    except Exception:
+        logging.error(" → Failed uninstalling %s:", module_name)
+        traceback.print_exc()
+        # continue uninstalling the next modules instead of stopping
+
+logging.info("All modules processed.")
+PYEOF
