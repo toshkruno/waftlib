@@ -233,6 +233,12 @@ if [ ! -f "${ODOO_WORK_DIR}/custom/src/repos.yaml" ]; then
   cd "${ODOO_WORK_DIR}"
 fi
 
+if [ ! -f "${ODOO_WORK_DIR}/custom/src/addons.yaml" ]; then
+  /bin/echo "INFO: Copy ${ODOO_WORK_DIR}/waftlib/templates/${ODOO_VERSION}/addons.yaml to ${ODOO_WORK_DIR}/custom/src/addons.yaml"
+  /bin/cp "${ODOO_WORK_DIR}/waftlib/templates/${ODOO_VERSION}/addons.yaml" "${ODOO_WORK_DIR}/custom/src/"
+  cd "${ODOO_WORK_DIR}"
+fi
+
 if [ ! -f "${ODOO_WORK_DIR}/initial-database" ] || [ -L "${ODOO_WORK_DIR}/initial-database" ]; then
   /bin/echo "INFO: Link ${ODOO_WORK_DIR}/waftlib/initial-database to ${ODOO_WORK_DIR}/initial-database"
   cd "${ODOO_WORK_DIR}" && /bin/ln -sf waftlib/initial-database
@@ -324,6 +330,7 @@ done
 cd "${ODOO_WORK_DIR}/.venv/lib/"*"/site-packages" && /bin/mkdir -p waftlib
 cd "${ODOO_WORK_DIR}"
 for fiLe in $(/bin/ls -1 "${ODOO_WORK_DIR}/waftlib/waftlib/"); do
+  # shellcheck disable=SC2144
   if [ ! -f "${ODOO_WORK_DIR}/.venv/lib/"*"/site-packages/waftlib/${fiLe}" ] || [ -L "${ODOO_WORK_DIR}/.venv/lib/"*"/site-packages/waftlib/${fiLe}" ]; then
     /bin/echo "INFO: Link ${ODOO_WORK_DIR}/waftlib/waftlib/${fiLe} to ${ODOO_WORK_DIR}/.venv/lib/"*"/site-packages/waftlib/${fiLe}"
     cd "${ODOO_WORK_DIR}/.venv/lib/"*"/site-packages/waftlib" && /bin/ln -sf "../../../../../waftlib/waftlib/${fiLe}"
