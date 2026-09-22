@@ -688,6 +688,7 @@ from click_odoo import OdooEnvironment
 
 MIGRATION_PATH = %r
 ODOO_CONF = %r
+SCRIPT_PATH = %r
 
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
@@ -703,9 +704,33 @@ logging.basicConfig(
 odoo_config.parse_config(["-c", ODOO_CONF])
 
 db_name = odoo_config.get("db_name")
+# Odoo 19.0 changed db_name to type='comma', config returns list.
+if isinstance(db_name, list):
+    db_name = db_name[0] if db_name else ""
 if not db_name:
     eprint("No 'db_name' found in Odoo configuration %%r" %% ODOO_CONF)
     sys.exit(1)
+
+# accept_language compatibility shim for OCA fastapi
+import types as _types
+if "accept_language" not in sys.modules:
+    try:
+        from parse_accept_language import parse_accept_language as _paf
+        _m = _types.ModuleType("accept_language")
+        _m.parse_accept_language = _paf
+        sys.modules["accept_language"] = _m
+    except ImportError:
+        pass
+
+# Check X-Supports annotation - skip if current Odoo version not supported
+import re as _xre
+with open(SCRIPT_PATH) as _xsf:
+    _xsrc = _xsf.read()
+_xm = _xre.search(r'#\\s*X-Supports:\\s*(.+)', _xsrc)
+if _xm and odoo.release.major_version not in _xm.group(1).split():
+    print("Skipping script: X-Supports=%%s, current Odoo=%%s" %% (
+        _xm.group(1).strip(), odoo.release.major_version))
+    sys.exit(0)
 
 # Create an Environment using click-odoo's OdooEnvironment context manager
 with OdooEnvironment(database=db_name) as env:
@@ -713,7 +738,7 @@ with OdooEnvironment(database=db_name) as env:
     globals()["env"] = env
 
     # Execute the migration script
-    with open(%r) as f:
+    with open(SCRIPT_PATH) as f:
         __script = f.read()
     exec(__script, globals())
 """ % (
@@ -1406,12 +1431,18 @@ def run_upgrade(version):
     start_version = os.environ.get("MIGRATION_START_VERSION", None)
     if version == start_version:
         if params["verbose"]:
-            args = f'-u base --log-level=debug_sql --log-handler=odoo.modules.loading:DEBUG --logfile "{logfile}" --stop-after-init'
+            if float(version) <= 10.0:
+                args = f'-u base --log-level=debug --log-handler=odoo.modules.loading:DEBUG --logfile "{logfile}" --stop-after-init'
+            else:
+                args = f'-u base --log-level=debug_sql --log-handler=odoo.modules.loading:DEBUG --logfile "{logfile}" --stop-after-init'
         else:
             args = f'-u base --logfile "{logfile}" --stop-after-init'
     else:
         if params["verbose"]:
-            args = f'-u base --load=openupgrade_framework --log-level=debug_sql --log-handler=odoo.modules.loading:DEBUG --log-handler=odoo.modules.migration:DEBUG --logfile "{logfile}" --stop-after-init'
+            if float(version) <= 10.0:
+                args = f'-u base --load=openupgrade_framework --log-level=debug --log-handler=odoo.modules.loading:DEBUG --log-handler=odoo.modules.migration:DEBUG --logfile "{logfile}" --stop-after-init'
+            else:
+                args = f'-u base --load=openupgrade_framework --log-level=debug_sql --log-handler=odoo.modules.loading:DEBUG --log-handler=odoo.modules.migration:DEBUG --logfile "{logfile}" --stop-after-init'
         else:
             args = f'-u base --load=openupgrade_framework --logfile "{logfile}" --stop-after-init'
     cmd(build_dir + "/run " + args)
